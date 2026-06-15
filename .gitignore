@@ -1,4 +1,52 @@
+# === Python Virtual Environment ===
 venv/
+.venv/
+env/
+ENV/
+bin/
+lib/
+include/
+
+# === Python Cache & Compiler Outputs ===
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# === Jupyter Notebook Checkpoints ===
 .ipynb_checkpoints/
+*/.ipynb_checkpoints/*
+.ipython/
+
+# === IDE & Text Editor Settings ===
+.vscode/
+.idea/
+*.swp
+*.swo
+.project
+.pydevproject
+.settings/
+
+# === OS & System Files ===
+.DS_Store
+Thumbs.db
+ehthumbs.db
+desktop.ini
+
+# === Streamlit Technical Files ===
+.streamlit/
+! .streamlit/config.toml
+*.streamlit
+
+# === Large ML Artifacts (Model & Cache) ===
+models/*.pkl
+models/*.joblib
+models/*.gbtree
+
+# === Cleaned/Feature Data Output (Optional, but recommended for large datasets) ===
+# data/cleaned/
+# data/features/
+# reports/figures/
