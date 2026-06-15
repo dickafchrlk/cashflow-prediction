@@ -78,6 +78,8 @@ Aplikasi Streamlit dibangun di `app/app.py` sebagai dashboard production:
   4. **Tabel Fitur**: Tabel interaktif untuk meninjau detail rekayasa fitur secara transparan.
 
 * **Cara Menjalankan Aplikasi Lokal**:
+  # Install Virtual environment
+  python -m venv venv
   ```powershell
   # Aktifkan virtual environment
   .\venv\Scripts\Activate.ps1
