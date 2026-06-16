@@ -10,8 +10,8 @@ from sklearn.metrics import root_mean_squared_error, mean_absolute_error
 BASE_DIR = Path(__file__).resolve().parents[2]
 
 
-def evaluate_monthly():
-    print("Memulai evaluasi model bulanan pada dataset Testing...")
+def evaluate_weekly():
+    print("Memulai evaluasi model mingguan pada dataset Testing...")
 
     # Path file input dan output
     test_path = BASE_DIR / "data/features/test.csv"
@@ -36,7 +36,7 @@ def evaluate_monthly():
 
     X_test = test_df[feature_cols]
     y_test = test_df[target_col]
-    months = test_df['month']
+    weeks = test_df['week']
 
     # Lakukan prediksi
     y_pred = model.predict(X_test)
@@ -46,11 +46,10 @@ def evaluate_monthly():
     mae = mean_absolute_error(y_test, y_pred)
     
     # Perhitungan MAPE (Mean Absolute Percentage Error)
-    # Gunakan eps=1e-5 untuk mencegah division by zero
     y_true_val = y_test.values
     mape = np.mean(np.abs((y_true_val - y_pred) / (y_true_val + 1e-5))) * 100
 
-    print("\nHasil Evaluasi pada Data Testing (Bulanan):")
+    print("\nHasil Evaluasi pada Data Testing (Mingguan):")
     print(f"  - MAE:  Rp {mae:,.2f}")
     print(f"  - RMSE: Rp {rmse:,.2f}")
     print(f"  - MAPE: {mape:.2f}%")
@@ -70,13 +69,14 @@ def evaluate_monthly():
     # Plot Aktual vs Prediksi
     figures_dir.mkdir(parents=True, exist_ok=True)
     
-    plt.figure(figsize=(8, 5))
-    plt.plot(months, y_test, marker='o', label='Aktual', color='blue', markersize=8)
-    plt.plot(months, y_pred, marker='x', label='Prediksi XGBoost', color='red', linestyle='--', markersize=8)
-    plt.title('Kurva Perbandingan Aktual vs Prediksi (Test Set Bulanan)', fontsize=12)
-    plt.xlabel('Bulan', fontsize=10)
+    plt.figure(figsize=(10, 5))
+    plt.plot(weeks, y_test, marker='o', label='Aktual', color='blue', markersize=8)
+    plt.plot(weeks, y_pred, marker='x', label='Prediksi XGBoost', color='red', linestyle='--', markersize=8)
+    plt.title('Kurva Perbandingan Aktual vs Prediksi (Test Set Mingguan)', fontsize=12)
+    plt.xlabel('Minggu (Tanggal Mulai)', fontsize=10)
     plt.ylabel('Nominal (Rupiah)', fontsize=10)
     plt.grid(True, linestyle=':', alpha=0.6)
+    plt.xticks(rotation=45)
     plt.legend(fontsize=10)
     plt.tight_layout()
 
@@ -87,4 +87,4 @@ def evaluate_monthly():
 
 
 if __name__ == "__main__":
-    evaluate_monthly()
+    evaluate_weekly()

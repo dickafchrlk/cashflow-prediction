@@ -4,15 +4,10 @@ import pandas as pd
 BASE_DIR = Path(__file__).resolve().parents[2]
 
 
-def clean_and_merge():
-    print("Memulai pembersihan data...")
-    raw_jpnkas_path = BASE_DIR / "data/raw/JPNKAS.csv"
-    raw_jpngkas_path = BASE_DIR / "data/raw/JPNGKAS.csv"
-    output_path = BASE_DIR / "data/cleaned/clean_transactions.csv"
-
-    # Muat dataset mentah
-    df_kas = pd.read_csv(raw_jpnkas_path)
-    df_gkas = pd.read_csv(raw_jpngkas_path)
+def clean_cash_journals(df_kas, df_gkas):
+    """Fungsi inti pembersihan data jurnal kas (untuk kemudahan unit testing)."""
+    df_kas = df_kas.copy()
+    df_gkas = df_gkas.copy()
 
     # 1. Rapikan nama kolom (hapus spasi berlebih)
     df_kas.columns = df_kas.columns.astype(str).str.strip().str.replace(r'\s+', ' ', regex=True)
@@ -21,6 +16,10 @@ def clean_and_merge():
     # 2. Hapus kolom Unnamed
     df_kas = df_kas.loc[:, ~df_kas.columns.str.contains("^Unnamed")]
     df_gkas = df_gkas.loc[:, ~df_gkas.columns.str.contains("^Unnamed")]
+
+    # 2.5. Ubah string kosong atau hanya berisi spasi menjadi None
+    df_kas = df_kas.replace(r'^\s*$', None, regex=True)
+    df_gkas = df_gkas.replace(r'^\s*$', None, regex=True)
 
     # 3. Hapus baris agregasi (TOTAL) di dasar file
     if 'URAIAN' in df_kas.columns:
@@ -41,23 +40,21 @@ def clean_and_merge():
         df_gkas = df_gkas[df_gkas['TANGGAL'].notna()]
 
     # 5. Membersihkan data numerik (koma, tanda strip, format string)
-    # JPNKAS: kolom penerimaan utama DBT_KAS
-    cleaned_dbt = df_kas['DBT_KAS'].astype(str).str.replace(r'[^\d\.\-]', '', regex=True)
-    df_kas['DBT_KAS'] = pd.to_numeric(cleaned_dbt, errors='coerce').fillna(0.0)
+    if 'DBT_KAS' in df_kas.columns:
+        cleaned_dbt = df_kas['DBT_KAS'].astype(str).str.replace(r'[^\d\.\-]', '', regex=True)
+        df_kas['DBT_KAS'] = pd.to_numeric(cleaned_dbt, errors='coerce').fillna(0.0)
 
-    # JPNGKAS: kolom pengeluaran utama KREDIT_KAS
-    cleaned_kredit = df_gkas['KREDIT_KAS'].astype(str).str.replace(r'[^\d\.\-]', '', regex=True)
-    df_gkas['KREDIT_KAS'] = pd.to_numeric(cleaned_kredit, errors='coerce').fillna(0.0)
+    if 'KREDIT_KAS' in df_gkas.columns:
+        cleaned_kredit = df_gkas['KREDIT_KAS'].astype(str).str.replace(r'[^\d\.\-]', '', regex=True)
+        df_gkas['KREDIT_KAS'] = pd.to_numeric(cleaned_kredit, errors='coerce').fillna(0.0)
 
-    # 6. Agregasi data berdasarkan TANGGAL dan BULAN
+    # 6. Agregasi data berdasarkan TANGGAL
     df_kas['TANGGAL'] = pd.to_datetime(df_kas['TANGGAL'])
     df_gkas['TANGGAL'] = pd.to_datetime(df_gkas['TANGGAL'])
 
-    daily_inflow = df_kas.groupby(['TANGGAL', 'BULAN'])['DBT_KAS'].sum().reset_index()
+    daily_inflow = df_kas.groupby('TANGGAL')['DBT_KAS'].sum().reset_index()
     daily_inflow.rename(columns={'DBT_KAS': 'CASH_IN'}, inplace=True)
 
-    # Catatan: JPNGKAS tidak selalu memiliki nama kolom BULAN yang lengkap di setiap baris, 
-    # kita ambil BULAN dari JPNKAS jika memungkinkan, atau isi otomatis
     daily_outflow = df_gkas.groupby('TANGGAL')['KREDIT_KAS'].sum().reset_index()
     daily_outflow.rename(columns={'KREDIT_KAS': 'CASH_OUT'}, inplace=True)
 
@@ -69,11 +66,10 @@ def clean_and_merge():
     merged_df['CASH_OUT'] = merged_df['CASH_OUT'].fillna(0.0)
     merged_df['NET_CASH'] = merged_df['CASH_IN'] - merged_df['CASH_OUT']
 
-    # Filter rentang waktu yang valid dari 2025 onwards (sesuai data mayoritas)
+    # Filter rentang waktu yang valid dari 2025 onwards
     merged_df = merged_df[merged_df['TANGGAL'] >= '2025-01-01'].reset_index(drop=True)
 
-    # Isi kolom BULAN yang kosong berdasarkan tanggal
-    # (Pemetaan nama bulan Indonesia)
+    # Isi kolom BULAN berdasarkan tanggal (Nama bulan Indonesia)
     months_id = {
         1: "JANUARI", 2: "FEBRUARI", 3: "MARET", 4: "APRIL", 5: "MEI", 6: "JUNI",
         7: "JULI", 8: "AGUSTUS", 9: "SEPTEMBER", 10: "OKTOBER", 11: "NOVEMBER", 12: "DESEMBER"
@@ -82,9 +78,23 @@ def clean_and_merge():
 
     # Ubah format TANGGAL kembali ke string YYYY-MM-DD
     merged_df['TANGGAL'] = merged_df['TANGGAL'].dt.strftime('%Y-%m-%d')
-
-    # Urutkan kronologis
     merged_df = merged_df.sort_values('TANGGAL').reset_index(drop=True)
+
+    return merged_df
+
+
+def clean_and_merge():
+    print("Memulai pembersihan data...")
+    raw_jpnkas_path = BASE_DIR / "data/raw/JPNKAS.csv"
+    raw_jpngkas_path = BASE_DIR / "data/raw/JPNGKAS.csv"
+    output_path = BASE_DIR / "data/cleaned/clean_transactions.csv"
+
+    # Muat dataset mentah
+    df_kas = pd.read_csv(raw_jpnkas_path)
+    df_gkas = pd.read_csv(raw_jpngkas_path)
+
+    # Panggil fungsi pembersih
+    merged_df = clean_cash_journals(df_kas, df_gkas)
 
     # Simpan hasil akhir
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,7 +102,6 @@ def clean_and_merge():
 
     print(f"[OK] Sukses menyimpan data bersih tunggal di: {output_path}")
     print(f"     Dimensi: {merged_df.shape[0]} baris x {merged_df.shape[1]} kolom")
-    print(merged_df.head(3))
 
 
 if __name__ == "__main__":

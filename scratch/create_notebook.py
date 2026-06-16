@@ -10,10 +10,10 @@ notebook_content = {
    "cell_type": "markdown",
    "metadata": {},
    "source": [
-    "# Proyek Eksperimentasi & Pelatihan Model XGBoost Bulanan\n",
+    "# Proyek Eksperimentasi & Pelatihan Model XGBoost Mingguan\n",
     "\n",
     "**Judul Proyek**: Prediksi Arus Kas Koperasi Menggunakan Algoritma XGBoost untuk Mendukung Pengambilan Keputusan Keuangan  \n",
-    "**Deskripsi**: Notebook ini digunakan khusus untuk proses eksperimentasi, rekayasa fitur (agregasi bulanan & lagging), pemisahan data temporal (Train-Val-Test), serta pelatihan dan evaluasi model XGBoost Regressor."
+    "**Deskripsi**: Notebook ini digunakan khusus untuk proses eksperimentasi, rekayasa fitur (agregasi mingguan & lagging), pemisahan data temporal (Train-Val-Test), serta pelatihan dan evaluasi model XGBoost Regressor."
    ]
   },
   {
@@ -55,9 +55,9 @@ notebook_content = {
    "cell_type": "markdown",
    "metadata": {},
    "source": [
-    "## 2. Feature Engineering (Skala Bulanan)\n",
-    "Sesuai ketentuan, dataset bulanan wajib memiliki kolom berikut:\n",
-    "* `month`\n",
+    "## 2. Feature Engineering (Skala Mingguan)\n",
+    "Sesuai ketentuan, dataset mingguan memiliki kolom fitur berikut:\n",
+    "* `week`\n",
     "* `cash_in`\n",
     "* `cash_out`\n",
     "* `net_cash`\n",
@@ -75,44 +75,44 @@ notebook_content = {
    "outputs": [],
    "source": [
     "df['TANGGAL'] = pd.to_datetime(df['TANGGAL'])\n",
-    "df['month_period'] = df['TANGGAL'].dt.to_period('M')\n",
+    "df['week_period'] = df['TANGGAL'].dt.to_period('W')\n",
     "\n",
-    "# Agregasi bulanan\n",
-    "monthly_df = df.groupby('month_period').agg({\n",
+    "# Agregasi mingguan\n",
+    "weekly_df = df.groupby('week_period').agg({\n",
     "    'CASH_IN': 'sum',\n",
     "    'CASH_OUT': 'sum'\n",
     "}).reset_index()\n",
     "\n",
-    "monthly_df.rename(columns={\n",
-    "    'month_period': 'month',\n",
+    "weekly_df.rename(columns={\n",
+    "    'week_period': 'week',\n",
     "    'CASH_IN': 'cash_in',\n",
     "    'CASH_OUT': 'cash_out'\n",
     "}, inplace=True)\n",
     "\n",
     "# Hitung net_cash\n",
-    "monthly_df['net_cash'] = monthly_df['cash_in'] - monthly_df['cash_out']\n",
-    "monthly_df = monthly_df.sort_values('month').reset_index(drop=True)\n",
+    "weekly_df['net_cash'] = weekly_df['cash_in'] - weekly_df['cash_out']\n",
+    "weekly_df = weekly_df.sort_values('week').reset_index(drop=True)\n",
     "\n",
     "# Lags\n",
-    "monthly_df['lag_1'] = monthly_df['net_cash'].shift(1)\n",
-    "monthly_df['lag_2'] = monthly_df['net_cash'].shift(2)\n",
+    "weekly_df['lag_1'] = weekly_df['net_cash'].shift(1)\n",
+    "weekly_df['lag_2'] = weekly_df['net_cash'].shift(2)\n",
     "\n",
-    "# Rolling mean 3 periode dari lag\n",
-    "monthly_df['rolling_mean_3'] = monthly_df['net_cash'].shift(1).rolling(window=3).mean()\n",
+    "# Rolling mean 3 periode dari lag (t-1, t-2, t-3)\n",
+    "weekly_df['rolling_mean_3'] = weekly_df['net_cash'].shift(1).rolling(window=3).mean()\n",
     "\n",
     "# Growth rate dari lag 2 ke lag 1\n",
-    "monthly_df['growth_rate'] = (monthly_df['lag_1'] - monthly_df['lag_2']) / (monthly_df['lag_2'].abs() + 1e-5)\n",
+    "weekly_df['growth_rate'] = (weekly_df['lag_1'] - weekly_df['lag_2']) / (weekly_df['lag_2'].abs() + 1e-5)\n",
     "\n",
     "# Target (NetCash t+1)\n",
-    "monthly_df['target'] = monthly_df['net_cash'].shift(-1)\n",
+    "weekly_df['target'] = weekly_df['net_cash'].shift(-1)\n",
     "\n",
-    "# Ubah format month ke string\n",
-    "monthly_df['month'] = monthly_df['month'].astype(str)\n",
+    "# Ubah format week ke string menggunakan start_time\n",
+    "weekly_df['week'] = weekly_df['week'].apply(lambda r: r.start_time.strftime('%Y-%m-%d'))\n",
     "\n",
     "# Drop NaN akibat lagging & target shifting\n",
-    "features_df = monthly_df.dropna().reset_index(drop=True)\n",
-    "print(f\"Dimensi dataset fitur bulanan: {features_df.shape}\")\n",
-    "features_df"
+    "features_df = weekly_df.dropna().reset_index(drop=True)\n",
+    "print(f\"Dimensi dataset fitur mingguan: {features_df.shape}\")\n",
+    "features_df.head()"
    ]
   },
   {
@@ -121,9 +121,9 @@ notebook_content = {
    "source": [
     "## 3. Pembagian Data (Temporal Split)\n",
     "Rasio pembagian data:\n",
-    "* **Train = 70%** (4 baris pertama)\n",
-    "* **Validation = 15%** (baris ke-5)\n",
-    "* **Test = 15%** (baris ke-6)"
+    "* **Train = 70%** (27 baris pertama)\n",
+    "* **Validation = 15%** (6 baris berikutnya)\n",
+    "* **Test = 15%** (6 baris terakhir)"
    ]
   },
   {
@@ -132,9 +132,9 @@ notebook_content = {
    "metadata": {},
    "outputs": [],
    "source": [
-    "train_df = features_df.iloc[:4].reset_index(drop=True)\n",
-    "val_df = features_df.iloc[4:5].reset_index(drop=True)\n",
-    "test_df = features_df.iloc[5:].reset_index(drop=True)\n",
+    "train_df = features_df.iloc[:27].reset_index(drop=True)\n",
+    "val_df = features_df.iloc[27:33].reset_index(drop=True)\n",
+    "test_df = features_df.iloc[33:].reset_index(drop=True)\n",
     "\n",
     "feature_cols = ['lag_1', 'lag_2', 'rolling_mean_3', 'growth_rate']\n",
     "target_col = 'target'\n",
@@ -152,7 +152,7 @@ notebook_content = {
    "cell_type": "markdown",
    "metadata": {},
    "source": [
-    "## 4. Pelatihan Model XGBoost Bulanan"
+    "## 4. Pelatihan Model XGBoost Mingguan"
    ]
   },
   {
@@ -193,7 +193,7 @@ notebook_content = {
     "\n",
     "rmse = root_mean_squared_error(y_test, y_pred)\n",
     "mae = mean_absolute_error(y_test, y_pred)\n",
-    "mape = np.mean(np.abs((y_test - y_pred) / (y_test + 1e-5))) * 100\n",
+    "mape = np.mean(np.abs((y_test.values - y_pred) / (y_test.values + 1e-5))) * 100\n",
     "\n",
     "print(\"=== Hasil Evaluasi pada Test Set ===\")\n",
     "print(f\"MAE:  Rp {mae:,.2f}\")\n",
@@ -214,14 +214,16 @@ notebook_content = {
    "metadata": {},
    "outputs": [],
    "source": [
-    "plt.figure(figsize=(8, 5))\n",
-    "plt.plot(test_df['month'], y_test, marker='o', label='Aktual', color='blue')\n",
-    "plt.plot(test_df['month'], y_pred, marker='x', label='Prediksi XGBoost', color='red', linestyle='--')\n",
-    "plt.title('Kurva Perbandingan Aktual vs Prediksi Bulanan')\n",
-    "plt.xlabel('Bulan')\n",
+    "plt.figure(figsize=(10, 5))\n",
+    "plt.plot(test_df['week'], y_test, marker='o', label='Aktual', color='blue')\n",
+    "plt.plot(test_df['week'], y_pred, marker='x', label='Prediksi XGBoost', color='red', linestyle='--')\n",
+    "plt.title('Kurva Perbandingan Aktual vs Prediksi Mingguan')\n",
+    "plt.xlabel('Minggu (Tanggal Mulai)')\n",
     "plt.ylabel('Nominal (Rupiah)')\n",
+    "plt.xticks(rotation=45)\n",
     "plt.legend()\n",
     "plt.grid(True)\n",
+    "plt.tight_layout()\n",
     "plt.show()"
    ]
   },
@@ -244,7 +246,7 @@ notebook_content = {
     "\n",
     "with open('../models/features.pkl', 'wb') as f:\n",
     "    pickle.dump(feature_cols, f)\n",
-    "print(\"Serialisasi selesai! model.pkl dan features.pkl berhasil disimpan di folder models.\")"
+    "print(\"Serialisasi selesai! model.pkl and features.pkl berhasil disimpan di folder models.\")"
    ]
   }
  ],

@@ -7,7 +7,7 @@ from pathlib import Path
 
 # Setup page config
 st.set_page_config(
-    page_title="Prediksi Arus Kas Koperasi (Bulanan)",
+    page_title="Prediksi Arus Kas Koperasi (Mingguan)",
     page_icon="💰",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -85,40 +85,51 @@ def load_default_features():
 
 
 # Helper: Dynamic feature engineering from clean transactions
-def process_monthly_features(clean_df):
+def process_weekly_features(clean_df):
+    clean_df = clean_df.copy()
     clean_df['TANGGAL'] = pd.to_datetime(clean_df['TANGGAL'])
-    clean_df['month_period'] = clean_df['TANGGAL'].dt.to_period('M')
     
-    # Aggregate monthly
-    monthly_df = clean_df.groupby('month_period').agg({
+    # Pastikan CASH_IN dan CASH_OUT bertipe numerik (membersihkan formatting string jika ada)
+    for col in ['CASH_IN', 'CASH_OUT']:
+        if col in clean_df.columns:
+            if clean_df[col].dtype == object or clean_df[col].dtype == str or pd.api.types.is_string_dtype(clean_df[col]):
+                cleaned_vals = clean_df[col].astype(str).str.replace(r'[^\d\.\-]', '', regex=True)
+                clean_df[col] = pd.to_numeric(cleaned_vals, errors='coerce').fillna(0.0)
+            else:
+                clean_df[col] = pd.to_numeric(clean_df[col], errors='coerce').fillna(0.0)
+                
+    clean_df['week_period'] = clean_df['TANGGAL'].dt.to_period('W')
+    
+    # Aggregate weekly
+    weekly_df = clean_df.groupby('week_period').agg({
         'CASH_IN': 'sum',
         'CASH_OUT': 'sum'
     }).reset_index()
     
-    monthly_df.rename(columns={
-        'month_period': 'month',
+    weekly_df.rename(columns={
+        'week_period': 'week',
         'CASH_IN': 'cash_in',
         'CASH_OUT': 'cash_out'
     }, inplace=True)
     
-    monthly_df['net_cash'] = monthly_df['cash_in'] - monthly_df['cash_out']
-    monthly_df = monthly_df.sort_values('month').reset_index(drop=True)
+    weekly_df['net_cash'] = weekly_df['cash_in'] - weekly_df['cash_out']
+    weekly_df = weekly_df.sort_values('week').reset_index(drop=True)
     
     # Lag and rolling features
-    monthly_df['lag_1'] = monthly_df['net_cash'].shift(1)
-    monthly_df['lag_2'] = monthly_df['net_cash'].shift(2)
-    monthly_df['rolling_mean_3'] = monthly_df['net_cash'].shift(1).rolling(window=3).mean()
-    monthly_df['growth_rate'] = (monthly_df['lag_1'] - monthly_df['lag_2']) / (monthly_df['lag_2'].abs() + 1e-5)
+    weekly_df['lag_1'] = weekly_df['net_cash'].shift(1)
+    weekly_df['lag_2'] = weekly_df['net_cash'].shift(2)
+    weekly_df['rolling_mean_3'] = weekly_df['net_cash'].shift(1).rolling(window=3).mean()
+    weekly_df['growth_rate'] = (weekly_df['lag_1'] - weekly_df['lag_2']) / (weekly_df['lag_2'].abs() + 1e-5)
     
-    monthly_df['month'] = monthly_df['month'].astype(str)
-    return monthly_df
+    weekly_df['week'] = weekly_df['week'].apply(lambda r: r.start_time.strftime('%Y-%m-%d'))
+    return weekly_df
 
 
 # Header Banner
 st.markdown("""
 <div class="header-container">
-    <div class="header-title">💰 Dashboard Prediksi Arus Kas Bulanan Koperasi</div>
-    <div class="header-subtitle">Aplikasi Production untuk Peramalan Arus Kas Bersih Bulan Depan menggunakan XGBoost Regressor.</div>
+    <div class="header-title">💰 Dashboard Prediksi Arus Kas Mingguan Koperasi</div>
+    <div class="header-subtitle">Aplikasi Production untuk Peramalan Arus Kas Bersih Minggu Depan menggunakan XGBoost Regressor.</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -139,11 +150,11 @@ st.sidebar.markdown("---")
 with st.sidebar.expander("ℹ️ Spesifikasi Model", expanded=True):
     st.markdown("""
     * **Model**: XGBoost Regressor
-    * **Tingkat Waktu**: Bulanan (Monthly)
-    * **Metrik Pelatihan**:
-      * Train MAE: Rp 956,976.73
-      * Test MAE: Rp 24,205,655.97
-      * Test MAPE: 98.63%
+    * **Tingkat Waktu**: Mingguan (Weekly)
+    * **Metrik Evaluasi (Test Set)**:
+      * Test MAE: Rp 4,207,752.02
+      * Test MAPE: 133.99%
+      * Test R²: 0.0601
     """)
 
 # Data loading
@@ -156,8 +167,8 @@ if upload_mode:
     if uploaded_file:
         try:
             raw_clean_df = pd.read_csv(uploaded_file)
-            features_df = process_monthly_features(raw_clean_df)
-            st.sidebar.success("✅ Dataset bulanan berhasil direkayasa!")
+            features_df = process_weekly_features(raw_clean_df)
+            st.sidebar.success("✅ Dataset mingguan berhasil direkayasa!")
         except Exception as e:
             st.sidebar.error(f"Error memproses file: {e}")
     else:
@@ -168,20 +179,15 @@ else:
         st.warning("Data default `data/features/features.csv` tidak ditemukan. Silakan gunakan opsi Unggah Dataset.")
 
 if features_df is not None:
-    # 1. Prediction for the next month
-    # We build the features of the last month to predict the next month's target (Target(t) = NetCash(t+1))
-    # Note: If the last row in the uploaded dataset has NaN in target, it means we don't know the actual net_cash of next month yet, 
-    # but we can build features for the last month to predict it!
-    
-    # Check if there is a row with NaNs that we need to predict
-    # Let's take the very last month that has complete lag/rolling features to predict the next month
+    # 1. Prediction for the next week
+    # We build the features of the last week to predict the next week's target (Target(t) = NetCash(t+1))
     latest_valid_idx = features_df.dropna(subset=['lag_1', 'lag_2', 'rolling_mean_3']).index[-1]
     latest_row = features_df.loc[latest_valid_idx]
     
-    # Calculate next month
-    latest_month_period = pd.Period(latest_row['month'], freq='M')
-    next_month_period = latest_month_period + 1
-    next_month_str = str(next_month_period)
+    # Calculate next week
+    latest_week_start = pd.to_datetime(latest_row['week'])
+    next_week_start = latest_week_start + pd.Timedelta(weeks=1)
+    next_week_str = next_week_start.strftime('%Y-%m-%d')
     
     # Build feature vector for prediction
     pred_features = pd.DataFrame([{
@@ -200,8 +206,8 @@ if features_df is not None:
     with col1:
         st.markdown(f"""
         <div class="metric-card">
-            <div class="metric-label">📅 Bulan Data Terakhir</div>
-            <div class="metric-value">{latest_row['month']}</div>
+            <div class="metric-label">📅 Minggu Data Terakhir</div>
+            <div class="metric-value">{latest_row['week']}</div>
         </div>
         """, unsafe_allow_html=True)
         
@@ -218,7 +224,7 @@ if features_df is not None:
     with col3:
         st.markdown(f"""
         <div class="metric-card" style="border-left-color: #e74c3c;">
-            <div class="metric-label">🔮 Proyeksi Bulan Depan ({next_month_str})</div>
+            <div class="metric-label">🔮 Proyeksi Minggu Depan ({next_week_str})</div>
             <div class="metric-value" style="color: {'#2e7d32' if predicted_val >= 0 else '#c62828'}">
                 Rp {predicted_val:,.2f}
             </div>
@@ -228,20 +234,19 @@ if features_df is not None:
     st.markdown("---")
     
     # Layout Main Panel: Forecast and Plot
-    tab1, tab2 = st.tabs(["📊 Tren & Proyeksi Bulanan", "📋 Tabel Fitur Detail"])
+    tab1, tab2 = st.tabs(["📊 Tren & Proyeksi Mingguan", "📋 Tabel Fitur Detail"])
     
     with tab1:
         st.subheader("Kurva Perbandingan Aktual vs Proyeksi Arus Kas Bersih")
         
-        # Prepare plot data
-        # Historical actual values (all valid months)
-        plot_df = features_df.dropna(subset=['net_cash']).copy()
+        # Prepare plot data (show last 15 weeks for clarity)
+        plot_df = features_df.dropna(subset=['net_cash']).copy().tail(15)
         
         fig = go.Figure()
         
         # Plot historical net_cash
         fig.add_trace(go.Scatter(
-            x=plot_df['month'],
+            x=plot_df['week'],
             y=plot_df['net_cash'],
             mode='lines+markers',
             name='Net Cashflow Historis',
@@ -249,23 +254,23 @@ if features_df is not None:
             marker=dict(size=8)
         ))
         
-        # Connect last actual month with the next predicted month
-        connect_months = [plot_df['month'].iloc[-1], next_month_str]
+        # Connect last actual week with the next predicted week
+        connect_weeks = [plot_df['week'].iloc[-1], next_week_str]
         connect_values = [plot_df['net_cash'].iloc[-1], predicted_val]
         
         # Plot forecast point
         fig.add_trace(go.Scatter(
-            x=connect_months,
+            x=connect_weeks,
             y=connect_values,
             mode='lines+markers',
-            name='Proyeksi Bulan Depan (XGBoost)',
+            name='Proyeksi Minggu Depan (XGBoost)',
             line=dict(color='#e74c3c', width=3, dash='dash'),
             marker=dict(size=8, symbol='x')
         ))
         
         fig.update_layout(
-            title="Tren Bulanan Arus Kas Bersih Koperasi (Rupiah)",
-            xaxis_title="Bulan",
+            title="Tren Mingguan Arus Kas Bersih Koperasi (Rupiah)",
+            xaxis_title="Minggu (Tanggal Mulai)",
             yaxis_title="Nominal (Rp)",
             legend_title="Kategori",
             hovermode="x unified",
@@ -276,7 +281,7 @@ if features_df is not None:
         st.plotly_chart(fig, use_container_width=True)
         
     with tab2:
-        st.subheader("Dataset Fitur Bulanan Hasil Rekayasa")
+        st.subheader("Dataset Fitur Mingguan Hasil Rekayasa")
         
         # Format table for display
         display_df = features_df.copy()
